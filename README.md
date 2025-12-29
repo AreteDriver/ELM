@@ -4,10 +4,12 @@ A Rust-based CLI tool for running EVE Online on Linux using Proton/Wine.
 
 ## Features
 
+- **One-Click Launch**: `elm run` handles everything automatically
+- **Multi-Account Support**: Manage multiple profiles for multiboxing
 - **Engine Management**: Download and manage GE-Proton versions with SHA256 verification
-- **Prefix Management**: Create and manage Wine prefixes for EVE
 - **Snapshot/Rollback**: Save and restore prefix states using tar.zst compression
 - **Auto-Update**: Check for and install new GE-Proton releases from GitHub
+- **Settings Presets**: Switch between performance, quality, and balanced modes
 - **System Diagnostics**: Verify your system meets EVE's requirements
 
 ## Installation
@@ -17,13 +19,25 @@ A Rust-based CLI tool for running EVE Online on Linux using Proton/Wine.
 ```bash
 git clone https://github.com/AreteDriver/ELM.git
 cd ELM/elm
+./install.sh
+```
+
+### Arch Linux (AUR)
+
+```bash
+yay -S elm-eve-git
+```
+
+### Manual Build
+
+```bash
 cargo build --release
 cp target/release/elm ~/.local/bin/
 ```
 
 ### Dependencies
 
-- Rust 1.70+
+- Rust 1.70+ (build only)
 - Python 3 (for Proton)
 - Steam (for Proton compatibility layer)
 - Vulkan drivers
@@ -43,7 +57,18 @@ elm status
 
 ## Commands
 
-### `elm run`
+### Core Commands
+
+| Command | Description |
+|---------|-------------|
+| `elm run` | Launch EVE Online (auto-setup on first run) |
+| `elm status` | Show installed engines, prefixes, snapshots |
+| `elm doctor` | System compatibility diagnostics |
+| `elm update` | Check for GE-Proton updates |
+| `elm clean` | Remove old engines and download cache |
+| `elm logs` | View Wine/Proton and EVE logs |
+
+### `elm run [--profile NAME]`
 
 Launch EVE Online. On first run, this will:
 1. Download and install GE-Proton
@@ -51,83 +76,97 @@ Launch EVE Online. On first run, this will:
 3. Download and install the EVE Launcher
 4. Launch the game
 
-### `elm status`
-
-Show installed engines, prefixes, and snapshots.
-
-### `elm doctor`
-
-Run system diagnostics to verify:
-- Vulkan support and version
-- GPU vendor and driver
-- Steam installation
-- Required libraries
-- Disk space
+```bash
+elm run                    # Launch default profile
+elm run --profile alt      # Launch alternate profile
+```
 
 ### `elm update [--install]`
 
-Check for GE-Proton updates. Use `--install` to automatically download and install the latest version.
-
-### `elm engine install`
+Check for GE-Proton updates.
 
 ```bash
-elm engine install \
-  --schemas ~/.local/share/elm/schemas \
-  --engine path/to/engine.json \
-  --engines-dir ~/.local/share/elm/engines \
-  --downloads-dir ~/.local/share/elm/downloads
+elm update                 # Check for updates
+elm update --install       # Download and install latest
 ```
 
-### `elm prefix init`
+### `elm clean`
+
+Clean up disk space:
 
 ```bash
-elm prefix init \
-  --proton-root ~/.local/share/elm/engines/ge-proton10-27/dist/GE-Proton10-27 \
-  --prefix ~/.local/share/elm/prefixes/eve-default
+elm clean --downloads      # Remove downloaded archives
+elm clean --engines        # Remove old engine versions (keep latest)
+elm clean --all            # Remove both
+elm clean --all --dry-run  # Preview what would be removed
 ```
 
-### `elm snapshot`
+### `elm logs`
 
-Create a backup of your prefix:
+View logs for debugging:
+
+```bash
+elm logs                   # Show last 50 lines of launcher log
+elm logs --list            # List all available log files
+elm logs -n 100            # Show last 100 lines
+elm logs --log-type squirrel  # View installer logs
+elm logs --log-type proton    # View proton logs
+```
+
+### Profile Management
+
+Manage multiple EVE accounts with separate prefixes:
+
+```bash
+elm profile list                    # List all profiles
+elm profile create <name>           # Create new profile
+elm profile clone <source> <target> # Clone existing profile
+elm profile info <name>             # Show profile details
+elm profile delete <name>           # Delete profile
+```
+
+**Multiboxing example:**
+```bash
+elm profile create alt1
+elm profile create alt2
+elm run --profile default &
+elm run --profile alt1 &
+elm run --profile alt2 &
+```
+
+### Configuration
+
+Manage settings and presets:
+
+```bash
+elm config init            # Create default config files
+elm config show            # Display current settings
+elm config edit            # Open config in $EDITOR
+elm config preset <name>   # Apply a settings preset
+```
+
+**Available presets:**
+- `performance` - Maximum FPS, FSR upscaling, shader cache
+- `quality` - Native resolution, no async shaders
+- `balanced` - Good performance with FPS counter
+- `debug` - Verbose logging for troubleshooting
+
+### Snapshot/Rollback
+
+Backup and restore your prefix:
 
 ```bash
 elm snapshot \
   --prefix ~/.local/share/elm/prefixes/eve-default \
   --snapshots ~/.local/share/elm/snapshots \
-  --name my-backup
-```
+  --name before-patch
 
-### `elm rollback`
-
-Restore a prefix from a snapshot:
-
-```bash
 elm rollback \
-  --snapshot ~/.local/share/elm/snapshots/my-backup.tar.zst \
+  --snapshot ~/.local/share/elm/snapshots/before-patch.tar.zst \
   --prefix ~/.local/share/elm/prefixes/eve-default
 ```
 
-### `elm validate`
-
-Validate JSON config files against schemas:
-
-```bash
-elm validate \
-  --schemas ~/.local/share/elm/schemas \
-  --manifest path/to/manifest.json
-```
-
-### `elm install eve`
-
-Download and install the EVE Launcher into a prefix:
-
-```bash
-elm install eve \
-  --prefix ~/.local/share/elm/prefixes/eve-default \
-  --proton-root ~/.local/share/elm/engines/ge-proton10-27/dist/GE-Proton10-27
-```
-
-## Configuration
+## Configuration Files
 
 Configs are stored in `~/.config/elm/`:
 
@@ -139,11 +178,10 @@ Data is stored in `~/.local/share/elm/`:
 - `prefixes/` - Wine prefixes
 - `snapshots/` - Prefix backups
 - `downloads/` - Downloaded archives
-- `schemas/` - JSON schemas
 
 ## Environment Variables
 
-The following environment variables are set automatically for optimal EVE performance:
+Default environment variables for optimal EVE performance:
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
@@ -152,6 +190,9 @@ The following environment variables are set automatically for optimal EVE perfor
 | `PROTON_NO_FSYNC` | `0` | Enable fsync |
 | `PROTON_ENABLE_NVAPI` | `1` | NVIDIA API support |
 | `VKD3D_FEATURE_LEVEL` | `12_1` | DirectX 12 feature level |
+| `WINE_FULLSCREEN_FSR` | `1` | AMD FidelityFX upscaling |
+
+Use `elm config preset <name>` to switch between optimized configurations.
 
 ## Troubleshooting
 
@@ -180,11 +221,20 @@ sudo apt install steam
 
 ### EVE crashes on launch
 
-Try rolling back to a known-good prefix state:
-
+1. Check logs: `elm logs`
+2. Try debug preset: `elm config preset debug`
+3. Roll back to known-good state:
 ```bash
 elm rollback --snapshot ~/.local/share/elm/snapshots/eve-fresh-install.tar.zst \
              --prefix ~/.local/share/elm/prefixes/eve-default
+```
+
+### View detailed diagnostics
+
+```bash
+elm doctor
+elm logs --log-type proton
+elm logs --log-type squirrel
 ```
 
 ## License
