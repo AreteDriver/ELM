@@ -1,0 +1,70 @@
+# Maintainer: AreteDriver <aretedriver@users.noreply.github.com>
+pkgname=elm-eve
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="EVE Linux Manager - Run EVE Online on Linux with Proton"
+arch=('x86_64')
+url="https://github.com/AreteDriver/ELM"
+license=('MIT')
+depends=(
+    'steam'
+    'vulkan-icd-loader'
+    'lib32-vulkan-icd-loader'
+    'python'
+)
+makedepends=(
+    'rust'
+    'cargo'
+    'git'
+)
+optdepends=(
+    'vulkan-tools: for elm doctor diagnostics'
+    'mesa-utils: for elm doctor diagnostics'
+)
+provides=('elm-eve')
+conflicts=('elm-eve-git')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/AreteDriver/ELM/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "ELM-$pkgver/elm"
+    cargo build --release --locked
+}
+
+package() {
+    cd "ELM-$pkgver/elm"
+
+    # Install binary
+    install -Dm755 "target/release/elm" "$pkgdir/usr/bin/elm"
+
+    # Install schemas
+    install -d "$pkgdir/usr/share/elm/schemas"
+    install -Dm644 core/elm-core/schemas/*.json "$pkgdir/usr/share/elm/schemas/"
+
+    # Install desktop entry
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/eve-online-elm.desktop" << 'EOF'
+[Desktop Entry]
+Name=EVE Online (ELM)
+Comment=Launch EVE Online via ELM
+Exec=elm run
+Icon=eve-online
+Terminal=false
+Type=Application
+Categories=Game;
+Keywords=EVE;Online;Space;MMO;
+EOF
+
+    # Install license
+    install -Dm644 ../LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE" 2>/dev/null || true
+
+    # Install README
+    install -Dm644 ../README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
+
+post_install() {
+    echo "==> ELM installed successfully!"
+    echo "==> Run 'elm run' to launch EVE Online"
+    echo "==> Run 'elm doctor' to check system compatibility"
+    echo ""
+    echo "==> First run will download GE-Proton and EVE Launcher (~700MB)"
+}

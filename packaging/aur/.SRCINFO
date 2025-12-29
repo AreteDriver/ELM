@@ -1,0 +1,22 @@
+pkgbase = elm-eve
+	pkgdesc = EVE Linux Manager - Run EVE Online on Linux with Proton
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/AreteDriver/ELM
+	arch = x86_64
+	license = MIT
+	makedepends = rust
+	makedepends = cargo
+	makedepends = git
+	depends = steam
+	depends = vulkan-icd-loader
+	depends = lib32-vulkan-icd-loader
+	depends = python
+	optdepends = vulkan-tools: for elm doctor diagnostics
+	optdepends = mesa-utils: for elm doctor diagnostics
+	provides = elm-eve
+	conflicts = elm-eve-git
+	source = elm-eve-0.1.0.tar.gz::https://github.com/AreteDriver/ELM/archive/refs/tags/v0.1.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = elm-eve
