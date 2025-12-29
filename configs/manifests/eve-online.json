@@ -10,7 +10,7 @@
     "install_dir": "CCP/EVE"
   },
   "engine": {
-    "ref": "ge-proton-10-26"
+    "ref": "ge-proton10-27"
   },
   "runtime": {
     "wineprefix_layout": "per-profile",
@@ -39,10 +39,10 @@
   "launch": {
     "entrypoints": [
       {
-        "name": "EVE Client",
+        "name": "EVE Launcher",
         "type": "exe",
-        "path": "drive_c/CCP/EVE/tq/bin64/exefile.exe",
-        "args": ["/server:tranquility"]
+        "path": "drive_c/users/steamuser/AppData/Local/eve-online/eve-online.exe",
+        "args": []
       }
     ]
   }

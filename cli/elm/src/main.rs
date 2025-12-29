@@ -238,7 +238,7 @@ async fn main() -> Result<()> {
                 .and_then(|m| m.launch.entrypoints.first())
                 .and_then(|e| e.path.clone())
                 .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("drive_c/CCP/EVE/tq/bin64/exefile.exe"));
+                .unwrap_or_else(|| PathBuf::from("drive_c/users/steamuser/AppData/Local/eve-online/eve-online.exe"));
 
             let launch_args: Vec<String> = manifest.as_ref()
                 .and_then(|m| m.launch.entrypoints.first())
@@ -1132,7 +1132,7 @@ async fn main() -> Result<()> {
       {
         "name": "EVE Launcher",
         "type": "exe",
-        "path": "drive_c/users/steamuser/AppData/Local/eve-online/app-1.12.8/eve-online.exe"
+        "path": "drive_c/users/steamuser/AppData/Local/eve-online/eve-online.exe"
       }
     ]
   }
