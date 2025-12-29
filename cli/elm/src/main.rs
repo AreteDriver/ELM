@@ -22,6 +22,21 @@ enum Commands {
     Status,
     /// Check system compatibility and dependencies
     Doctor,
+    /// View Wine/Proton and EVE logs
+    Logs {
+        /// Log type: launcher, wine, all (default: launcher)
+        #[arg(long, default_value = "launcher")]
+        log_type: String,
+        /// Number of lines to show (default: 50)
+        #[arg(long, short = 'n', default_value = "50")]
+        lines: usize,
+        /// List available log files without showing content
+        #[arg(long)]
+        list: bool,
+        /// Profile name (default: "default")
+        #[arg(long, default_value = "default")]
+        profile: String,
+    },
     /// Check for engine updates
     Update {
         /// Actually download and install the update
@@ -438,6 +453,114 @@ async fn main() -> Result<()> {
                 println!("✗ {} issue(s) found", issues);
             }
         }
+        Commands::Logs { log_type, lines, list, profile } => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let prefix_dir = PathBuf::from(format!("{home}/.local/share/elm/prefixes/eve-{profile}"));
+            let logs_dir = prefix_dir.join("pfx/drive_c/users/steamuser/AppData/Roaming/EVE Online/logs");
+
+            // Collect all log files
+            let mut log_files: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+
+            // EVE Launcher logs
+            if logs_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&logs_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().map(|e| e == "log").unwrap_or(false) {
+                            if let Ok(meta) = path.metadata() {
+                                if let Ok(modified) = meta.modified() {
+                                    log_files.push((path, modified));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Squirrel/installer logs
+            let squirrel_log = prefix_dir.join("pfx/drive_c/users/steamuser/AppData/Local/eve-online/Squirrel-Update.log");
+            if squirrel_log.exists() {
+                if let Ok(meta) = squirrel_log.metadata() {
+                    if let Ok(modified) = meta.modified() {
+                        log_files.push((squirrel_log, modified));
+                    }
+                }
+            }
+
+            // Proton fixes log
+            let proton_log = PathBuf::from("/tmp/protonfixes_test.log");
+            if proton_log.exists() {
+                if let Ok(meta) = proton_log.metadata() {
+                    if let Ok(modified) = meta.modified() {
+                        log_files.push((proton_log, modified));
+                    }
+                }
+            }
+
+            // Sort by modification time (newest first)
+            log_files.sort_by(|a, b| b.1.cmp(&a.1));
+
+            if list {
+                println!("Available log files:\n");
+                for (path, time) in &log_files {
+                    let age = time.elapsed().map(|d| {
+                        if d.as_secs() < 60 {
+                            format!("{}s ago", d.as_secs())
+                        } else if d.as_secs() < 3600 {
+                            format!("{}m ago", d.as_secs() / 60)
+                        } else if d.as_secs() < 86400 {
+                            format!("{}h ago", d.as_secs() / 3600)
+                        } else {
+                            format!("{}d ago", d.as_secs() / 86400)
+                        }
+                    }).unwrap_or_else(|_| "?".to_string());
+
+                    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                    println!("  {} ({}, {})", path.display(), age, format_size(size));
+                }
+                return Ok(());
+            }
+
+            // Filter by log type
+            let filtered: Vec<_> = match log_type.as_str() {
+                "launcher" => log_files.into_iter().filter(|(p, _)| {
+                    p.file_name().map(|n| n.to_string_lossy().contains("eve-online-launcher")).unwrap_or(false)
+                }).collect(),
+                "wine" | "proton" => log_files.into_iter().filter(|(p, _)| {
+                    p.to_string_lossy().contains("proton") || p.to_string_lossy().contains("wine")
+                }).collect(),
+                "squirrel" | "installer" => log_files.into_iter().filter(|(p, _)| {
+                    p.to_string_lossy().contains("Squirrel")
+                }).collect(),
+                "all" => log_files,
+                _ => {
+                    println!("Unknown log type: {}. Use: launcher, wine, squirrel, all", log_type);
+                    return Ok(());
+                }
+            };
+
+            if filtered.is_empty() {
+                println!("No {} logs found for profile '{}'", log_type, profile);
+                println!("\nRun 'elm logs --list' to see all available logs");
+                return Ok(());
+            }
+
+            // Show most recent log
+            let (log_path, _) = &filtered[0];
+            println!("=== {} ===\n", log_path.display());
+
+            if let Ok(content) = std::fs::read_to_string(log_path) {
+                let all_lines: Vec<&str> = content.lines().collect();
+                let start = if all_lines.len() > lines { all_lines.len() - lines } else { 0 };
+                for line in &all_lines[start..] {
+                    println!("{}", line);
+                }
+                println!("\n=== Showing last {} of {} lines ===",
+                    std::cmp::min(lines, all_lines.len()), all_lines.len());
+            } else {
+                println!("(could not read log file)");
+            }
+        }
         Commands::Update { install } => {
             let home = std::env::var("HOME").unwrap_or_default();
             let engines_dir = PathBuf::from(format!("{home}/.local/share/elm/engines"));
@@ -632,4 +755,16 @@ fn dir_size(path: &std::path::Path) -> std::io::Result<u64> {
         }
     }
     Ok(size)
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
 }
