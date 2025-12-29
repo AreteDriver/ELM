@@ -32,9 +32,24 @@ enum Commands {
         /// MangoHud config (e.g., "fps,gpu_temp,cpu_temp,frametime")
         #[arg(long, default_value = "")]
         hud_config: String,
+        /// Launch in background (for multiboxing multiple clients)
+        #[arg(long, visible_alias = "bg")]
+        background: bool,
         /// Additional arguments to pass to EVE
         #[arg(long, num_args = 1..)]
         args: Vec<String>,
+    },
+    /// Launch multiple EVE clients at once
+    Multi {
+        /// Number of clients to launch
+        #[arg(default_value = "2")]
+        count: usize,
+        /// Delay between launches in seconds
+        #[arg(long, default_value = "5")]
+        delay: u64,
+        /// Profiles to launch (comma-separated, or "default" for all same profile)
+        #[arg(long, default_value = "default")]
+        profiles: String,
     },
     /// Show installed engines, prefixes, and snapshots
     Status,
@@ -234,7 +249,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.cmd {
-        Commands::Run { profile, singularity, dx12, notify, hud, hud_config, args: extra_args } => {
+        Commands::Run { profile, singularity, dx12, notify, hud, hud_config, background, args: extra_args } => {
             let home = std::env::var("HOME").unwrap_or_default();
             let data_dir = PathBuf::from(format!("{home}/.local/share/elm"));
             let config_dir = std::env::var("ELM_CONFIG_DIR")
@@ -366,56 +381,119 @@ async fn main() -> Result<()> {
                 println!("✓ Args: {}", launch_args.join(" "));
             }
 
-            println!("Launching EVE Online...");
-            let start_time = std::time::Instant::now();
+            if background {
+                println!("Launching EVE Online (background)...");
+                let spec = elm_core::runtime::launch::LaunchSpec {
+                    proton_root,
+                    prefix_dir,
+                    exe_path_in_prefix: exe_rel,
+                    args: launch_args,
+                    env: env_vars,
+                };
+                elm_core::runtime::launch::launch_background(spec)?;
+                println!("✓ EVE launched in background");
+            } else {
+                println!("Launching EVE Online...");
+                let start_time = std::time::Instant::now();
 
-            let spec = elm_core::runtime::launch::LaunchSpec {
-                proton_root,
-                prefix_dir,
-                exe_path_in_prefix: exe_rel,
-                args: launch_args,
-                env: env_vars,
+                let spec = elm_core::runtime::launch::LaunchSpec {
+                    proton_root,
+                    prefix_dir,
+                    exe_path_in_prefix: exe_rel,
+                    args: launch_args,
+                    env: env_vars,
+                };
+                let result = elm_core::runtime::launch::launch(spec).await;
+
+                // Send notification when EVE closes
+                if notify {
+                    let duration = start_time.elapsed();
+                    let hours = duration.as_secs() / 3600;
+                    let minutes = (duration.as_secs() % 3600) / 60;
+
+                    let time_str = if hours > 0 {
+                        format!("{}h {}m", hours, minutes)
+                    } else if minutes > 0 {
+                        format!("{}m", minutes)
+                    } else {
+                        "< 1m".to_string()
+                    };
+
+                    let (title, body, icon) = match &result {
+                        Ok(_) => (
+                            "EVE Online Closed",
+                            format!("Session ended after {}", time_str),
+                            "eve-online"
+                        ),
+                        Err(e) => (
+                            "EVE Online Error",
+                            format!("Crashed after {}: {}", time_str, e),
+                            "dialog-error"
+                        ),
+                    };
+
+                    let _ = std::process::Command::new("notify-send")
+                        .args([
+                            "--app-name=ELM",
+                            &format!("--icon={}", icon),
+                            title,
+                            &body,
+                        ])
+                        .spawn();
+                }
+
+                result?;
+            }
+        }
+        Commands::Multi { count, delay, profiles } => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let data_dir = PathBuf::from(format!("{home}/.local/share/elm"));
+            let prefixes_dir = data_dir.join("prefixes");
+
+            // Parse profiles
+            let profile_list: Vec<&str> = if profiles == "default" {
+                vec!["default"; count]
+            } else {
+                profiles.split(',').collect()
             };
-            let result = elm_core::runtime::launch::launch(spec).await;
 
-            // Send notification when EVE closes
-            if notify {
-                let duration = start_time.elapsed();
-                let hours = duration.as_secs() / 3600;
-                let minutes = (duration.as_secs() % 3600) / 60;
-
-                let time_str = if hours > 0 {
-                    format!("{}h {}m", hours, minutes)
-                } else if minutes > 0 {
-                    format!("{}m", minutes)
-                } else {
-                    "< 1m".to_string()
-                };
-
-                let (title, body, icon) = match &result {
-                    Ok(_) => (
-                        "EVE Online Closed",
-                        format!("Session ended after {}", time_str),
-                        "eve-online"
-                    ),
-                    Err(e) => (
-                        "EVE Online Error",
-                        format!("Crashed after {}: {}", time_str, e),
-                        "dialog-error"
-                    ),
-                };
-
-                let _ = std::process::Command::new("notify-send")
-                    .args([
-                        "--app-name=ELM",
-                        &format!("--icon={}", icon),
-                        title,
-                        &body,
-                    ])
-                    .spawn();
+            if profile_list.len() < count {
+                println!("Warning: Only {} profile(s) specified for {} clients", profile_list.len(), count);
             }
 
-            result?;
+            println!("Launching {} EVE client(s)...\n", count);
+
+            for i in 0..count {
+                let profile = profile_list.get(i).unwrap_or(&"default");
+                let prefix_dir = prefixes_dir.join(format!("eve-{}", profile));
+
+                if !prefix_dir.join("pfx/drive_c").exists() {
+                    println!("  {} [{}]: Prefix not initialized, skipping", i + 1, profile);
+                    println!("     Run: elm run --profile {}", profile);
+                    continue;
+                }
+
+                println!("  {} [{}]: Launching...", i + 1, profile);
+
+                // Launch via elm run --background
+                let status = std::process::Command::new(std::env::current_exe()?)
+                    .args(["run", "--profile", profile, "--background"])
+                    .status();
+
+                match status {
+                    Ok(s) if s.success() => println!("  {} [{}]: ✓ Started", i + 1, profile),
+                    Ok(s) => println!("  {} [{}]: ✗ Failed (exit {})", i + 1, profile, s),
+                    Err(e) => println!("  {} [{}]: ✗ Error: {}", i + 1, profile, e),
+                }
+
+                // Delay between launches (except for last one)
+                if i < count - 1 && delay > 0 {
+                    println!("     Waiting {}s before next launch...", delay);
+                    std::thread::sleep(std::time::Duration::from_secs(delay));
+                }
+            }
+
+            println!("\n✓ Multi-launch complete");
         }
         Commands::Status => {
             let home = std::env::var("HOME").unwrap_or_default();
