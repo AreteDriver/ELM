@@ -113,29 +113,63 @@ async fn main() -> Result<()> {
         Commands::Run { profile } => {
             let home = std::env::var("HOME").unwrap_or_default();
             let data_dir = PathBuf::from(format!("{home}/.local/share/elm"));
+            let config_dir = std::env::var("ELM_CONFIG_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from(format!("{home}/.config/elm")));
             let engines_dir = data_dir.join("engines");
             let prefixes_dir = data_dir.join("prefixes");
             let downloads_dir = data_dir.join("downloads");
 
-            // Default paths for GE-Proton and EVE
-            let engine_id = "ge-proton-10-26";
-            let proton_root = engines_dir.join(engine_id).join("dist/GE-Proton10-26");
+            // Try to load manifest from config dir, fallback to bundled
+            let manifest_path = config_dir.join("manifests/eve-online.json");
+            let manifest: Option<elm_core::config::models::ManifestV1> = if manifest_path.exists() {
+                let content = std::fs::read_to_string(&manifest_path)?;
+                Some(serde_json::from_str(&content)?)
+            } else {
+                None
+            };
+
+            // Get config from manifest or use defaults
+            let engine_id = manifest.as_ref()
+                .map(|m| m.engine.engine_ref.clone())
+                .unwrap_or_else(|| "ge-proton-10-26".to_string());
+
+            let exe_rel = manifest.as_ref()
+                .and_then(|m| m.launch.entrypoints.first())
+                .and_then(|e| e.path.clone())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("drive_c/CCP/EVE/tq/bin64/exefile.exe"));
+
+            let launch_args: Vec<String> = manifest.as_ref()
+                .and_then(|m| m.launch.entrypoints.first())
+                .and_then(|e| e.args.clone())
+                .unwrap_or_else(|| vec!["/server:tranquility".to_string()]);
+
+            let env_vars: HashMap<String, String> = manifest.as_ref()
+                .and_then(|m| m.env.as_ref())
+                .and_then(|e| e.base.clone())
+                .unwrap_or_else(|| [
+                    ("DXVK_ASYNC", "1"),
+                    ("PROTON_NO_ESYNC", "1"),
+                    ("PROTON_NO_FSYNC", "1"),
+                ].into_iter().map(|(k,v)| (k.to_string(), v.to_string())).collect());
+
+            let proton_root = engines_dir.join(&engine_id).join(format!("dist/GE-Proton10-26"));
             let prefix_dir = prefixes_dir.join(format!("eve-{}", profile));
-            let exe_rel = PathBuf::from("drive_c/CCP/EVE/tq/bin64/exefile.exe");
 
             // 1. Ensure engine is installed
             if !proton_root.join("proton").exists() {
                 println!("Engine not found. Run: elm engine install ...");
                 return Err(anyhow::anyhow!("Engine not installed at {}", proton_root.display()));
             }
-            println!("✓ Engine ready");
+            println!("✓ Engine: {}", engine_id);
 
             // 2. Ensure prefix is initialized
             if !prefix_dir.join("pfx/drive_c").exists() {
                 println!("Initializing prefix...");
                 elm_core::prefix::ensure_prefix_initialized(&prefix_dir, &proton_root).await?;
             }
-            println!("✓ Prefix ready");
+            println!("✓ Prefix: eve-{}", profile);
 
             // 3. Ensure EVE is installed
             let eve_exe = prefix_dir.join("pfx").join(&exe_rel);
@@ -145,18 +179,17 @@ async fn main() -> Result<()> {
             }
             println!("✓ EVE ready");
 
-            // 4. Launch
+            // 4. Launch with env from manifest
+            if manifest.is_some() {
+                println!("✓ Config loaded from {}", manifest_path.display());
+            }
             println!("Launching EVE Online...");
             let spec = elm_core::runtime::launch::LaunchSpec {
                 proton_root,
                 prefix_dir,
                 exe_path_in_prefix: exe_rel,
-                args: vec!["/server:tranquility".to_string()],
-                env: [
-                    ("DXVK_ASYNC", "1"),
-                    ("PROTON_NO_ESYNC", "1"),
-                    ("PROTON_NO_FSYNC", "1"),
-                ].into_iter().map(|(k,v)| (k.to_string(), v.to_string())).collect(),
+                args: launch_args,
+                env: env_vars,
             };
             elm_core::runtime::launch::launch(spec).await?;
         }
