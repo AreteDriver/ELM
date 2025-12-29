@@ -55,6 +55,11 @@ enum Commands {
         #[arg(long)]
         profile: Option<PathBuf>,
     },
+    /// Manage EVE profiles (multiple accounts)
+    Profile {
+        #[command(subcommand)]
+        cmd: ProfileCmd,
+    },
     Engine {
         #[command(subcommand)]
         cmd: EngineCmd,
@@ -127,6 +132,30 @@ enum InstallCmd {
         prefix: PathBuf,
         #[arg(long, default_value = "~/.local/share/elm/downloads")]
         downloads_dir: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProfileCmd {
+    /// List all profiles
+    List,
+    /// Create a new profile
+    Create {
+        /// Profile name
+        name: String,
+    },
+    /// Delete a profile (removes prefix and local data)
+    Delete {
+        /// Profile name
+        name: String,
+        /// Skip confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+    /// Show profile details
+    Info {
+        /// Profile name
+        name: String,
     },
 }
 
@@ -690,6 +719,184 @@ async fn main() -> Result<()> {
             if let Some(p) = profile {
                 let _ = elm_core::config::load::load_profile(&p, &schemas)?;
                 println!("OK: profile {}", p.display());
+            }
+        }
+        Commands::Profile { cmd } => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let prefixes_dir = PathBuf::from(format!("{home}/.local/share/elm/prefixes"));
+            let snapshots_dir = PathBuf::from(format!("{home}/.local/share/elm/snapshots"));
+
+            match cmd {
+                ProfileCmd::List => {
+                    println!("EVE Profiles");
+                    println!("============\n");
+
+                    if !prefixes_dir.exists() {
+                        println!("No profiles found. Create one with: elm profile create <name>");
+                        return Ok(());
+                    }
+
+                    let mut profiles: Vec<_> = std::fs::read_dir(&prefixes_dir)?
+                        .flatten()
+                        .filter(|e| e.path().is_dir())
+                        .filter(|e| e.file_name().to_string_lossy().starts_with("eve-"))
+                        .collect();
+
+                    if profiles.is_empty() {
+                        println!("No profiles found. Create one with: elm profile create <name>");
+                        return Ok(());
+                    }
+
+                    profiles.sort_by_key(|e| e.file_name());
+
+                    for entry in profiles {
+                        let name = entry.file_name().to_string_lossy().replace("eve-", "");
+                        let path = entry.path();
+                        let has_eve = path.join("pfx/drive_c/CCP/EVE").exists();
+                        let size = dir_size(&path).unwrap_or(0);
+
+                        let status = if has_eve { "✓" } else { "○" };
+                        println!("  {} {} ({:.1} GB)", status, name, size as f64 / 1_073_741_824.0);
+                    }
+
+                    println!("\n✓ = EVE installed, ○ = prefix only");
+                    println!("\nUsage: elm run --profile <name>");
+                }
+                ProfileCmd::Create { name } => {
+                    let prefix_dir = prefixes_dir.join(format!("eve-{}", name));
+
+                    if prefix_dir.exists() {
+                        println!("Profile '{}' already exists at {}", name, prefix_dir.display());
+                        return Ok(());
+                    }
+
+                    // Find engine
+                    let engines_dir = PathBuf::from(format!("{home}/.local/share/elm/engines"));
+                    let engine_dir = std::fs::read_dir(&engines_dir)?
+                        .flatten()
+                        .find(|e| e.path().join("installed.json").exists())
+                        .map(|e| e.path());
+
+                    let proton_root = match engine_dir {
+                        Some(dir) => {
+                            let dist = dir.join("dist");
+                            std::fs::read_dir(&dist)?
+                                .flatten()
+                                .find(|e| e.path().join("proton").exists())
+                                .map(|e| e.path())
+                                .ok_or_else(|| anyhow::anyhow!("No proton found in engine"))?
+                        }
+                        None => {
+                            println!("No engine installed. Run: elm update --install");
+                            return Ok(());
+                        }
+                    };
+
+                    println!("Creating profile '{}'...", name);
+                    elm_core::prefix::ensure_prefix_initialized(&prefix_dir, &proton_root).await?;
+                    println!("✓ Profile '{}' created at {}", name, prefix_dir.display());
+                    println!("\nTo install EVE: elm run --profile {}", name);
+                }
+                ProfileCmd::Delete { name, yes } => {
+                    let prefix_dir = prefixes_dir.join(format!("eve-{}", name));
+
+                    if !prefix_dir.exists() {
+                        println!("Profile '{}' not found", name);
+                        return Ok(());
+                    }
+
+                    let size = dir_size(&prefix_dir).unwrap_or(0);
+                    let size_gb = size as f64 / 1_073_741_824.0;
+
+                    if !yes {
+                        println!("Delete profile '{}'? ({:.1} GB)", name, size_gb);
+                        println!("This will permanently remove: {}", prefix_dir.display());
+                        print!("\nType 'yes' to confirm: ");
+                        use std::io::Write;
+                        std::io::stdout().flush()?;
+
+                        let mut input = String::new();
+                        std::io::stdin().read_line(&mut input)?;
+
+                        if input.trim() != "yes" {
+                            println!("Cancelled");
+                            return Ok(());
+                        }
+                    }
+
+                    println!("Deleting profile '{}'...", name);
+                    std::fs::remove_dir_all(&prefix_dir)?;
+
+                    // Also remove any snapshots for this profile
+                    if snapshots_dir.exists() {
+                        for entry in std::fs::read_dir(&snapshots_dir)?.flatten() {
+                            let fname = entry.file_name().to_string_lossy().to_string();
+                            if fname.starts_with(&format!("{}-", name)) || fname.starts_with(&format!("eve-{}-", name)) {
+                                std::fs::remove_file(entry.path())?;
+                                println!("  Removed snapshot: {}", fname);
+                            }
+                        }
+                    }
+
+                    println!("✓ Profile '{}' deleted ({:.1} GB freed)", name, size_gb);
+                }
+                ProfileCmd::Info { name } => {
+                    let prefix_dir = prefixes_dir.join(format!("eve-{}", name));
+
+                    if !prefix_dir.exists() {
+                        println!("Profile '{}' not found", name);
+                        return Ok(());
+                    }
+
+                    println!("Profile: {}", name);
+                    println!("=========={}", "=".repeat(name.len()));
+                    println!();
+
+                    // Size
+                    let size = dir_size(&prefix_dir).unwrap_or(0);
+                    println!("Size:     {:.2} GB", size as f64 / 1_073_741_824.0);
+                    println!("Path:     {}", prefix_dir.display());
+
+                    // EVE status
+                    let eve_path = prefix_dir.join("pfx/drive_c/CCP/EVE");
+                    if eve_path.exists() {
+                        println!("EVE:      ✓ installed");
+
+                        // Check for game client
+                        let client_path = eve_path.join("tq/bin64/exefile.exe");
+                        if client_path.exists() {
+                            println!("Client:   ✓ downloaded");
+                        } else {
+                            println!("Client:   ○ not downloaded (run game once)");
+                        }
+                    } else {
+                        println!("EVE:      ○ not installed");
+                    }
+
+                    // Snapshots
+                    println!();
+                    println!("Snapshots:");
+                    let mut found_snapshots = false;
+                    if snapshots_dir.exists() {
+                        for entry in std::fs::read_dir(&snapshots_dir)?.flatten() {
+                            let fname = entry.file_name().to_string_lossy().to_string();
+                            if fname.contains(&name) && fname.ends_with(".tar.zst") {
+                                let size = std::fs::metadata(entry.path()).map(|m| m.len()).unwrap_or(0);
+                                println!("  {} ({:.1} GB)", fname, size as f64 / 1_073_741_824.0);
+                                found_snapshots = true;
+                            }
+                        }
+                    }
+                    if !found_snapshots {
+                        println!("  (none)");
+                    }
+
+                    println!();
+                    println!("Commands:");
+                    println!("  elm run --profile {}           # Launch EVE", name);
+                    println!("  elm snapshot --prefix {} \\", prefix_dir.display());
+                    println!("    --snapshots {} --name {}-backup", snapshots_dir.display(), name);
+                }
             }
         }
         Commands::Engine { cmd } => match cmd {
