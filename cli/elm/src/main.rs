@@ -22,6 +22,12 @@ enum Commands {
     Status,
     /// Check system compatibility and dependencies
     Doctor,
+    /// Check for engine updates
+    Update {
+        /// Actually download and install the update
+        #[arg(long)]
+        install: bool,
+    },
     Validate {
         #[arg(long)]
         schemas: PathBuf,
@@ -420,6 +426,119 @@ async fn main() -> Result<()> {
             } else {
                 println!("✗ {} issue(s) found", issues);
             }
+        }
+        Commands::Update { install } => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let engines_dir = PathBuf::from(format!("{home}/.local/share/elm/engines"));
+            let downloads_dir = PathBuf::from(format!("{home}/.local/share/elm/downloads"));
+
+            println!("Checking for engine updates...\n");
+
+            // Get installed version
+            let installed: Option<String> = std::fs::read_dir(&engines_dir)
+                .ok()
+                .and_then(|entries| {
+                    entries
+                        .flatten()
+                        .filter(|e| e.path().is_dir())
+                        .filter(|e| e.path().join("installed.json").exists())
+                        .map(|e| e.file_name().to_string_lossy().to_string())
+                        .next()
+                });
+
+            println!("Installed: {}", installed.as_deref().unwrap_or("(none)"));
+
+            // Fetch latest from GitHub API
+            print!("Latest:    ");
+            let latest = std::process::Command::new("curl")
+                .args(["-s", "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest"])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .and_then(|s| {
+                    // Parse tag_name from JSON
+                    s.lines()
+                        .find(|l| l.contains("\"tag_name\""))
+                        .and_then(|l| l.split('"').nth(3))
+                        .map(|s| s.to_string())
+                });
+
+            let latest_tag = match &latest {
+                Some(tag) => {
+                    println!("{}", tag);
+                    tag.clone()
+                }
+                None => {
+                    println!("(failed to fetch)");
+                    return Err(anyhow::anyhow!("Could not fetch latest release from GitHub"));
+                }
+            };
+
+            // Compare versions
+            let installed_normalized = installed.as_ref()
+                .map(|s| s.to_lowercase().replace("-", "").replace("_", ""));
+            let latest_normalized = latest_tag.to_lowercase().replace("-", "").replace("_", "");
+
+            let needs_update = installed_normalized.as_ref()
+                .map(|i| i != &latest_normalized)
+                .unwrap_or(true);
+
+            if !needs_update {
+                println!("\n✓ Engine is up to date");
+                return Ok(());
+            }
+
+            println!("\n⬆ Update available!");
+
+            if !install {
+                println!("\nRun 'elm update --install' to download and install");
+                return Ok(());
+            }
+
+            // Download and install
+            println!("\nDownloading {}...", latest_tag);
+
+            let download_url = format!(
+                "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/{}/{}.tar.gz",
+                latest_tag, latest_tag
+            );
+
+            let archive_path = downloads_dir.join(format!("{}.tar.gz", latest_tag));
+            std::fs::create_dir_all(&downloads_dir)?;
+
+            // Download with curl (shows progress)
+            let status = std::process::Command::new("curl")
+                .args(["-L", "-o", archive_path.to_str().unwrap(), &download_url, "--progress-bar"])
+                .status()?;
+
+            if !status.success() {
+                return Err(anyhow::anyhow!("Download failed"));
+            }
+
+            // Extract
+            println!("Extracting...");
+            let engine_id = latest_tag.to_lowercase();
+            let engine_dir = engines_dir.join(&engine_id);
+            let dist_dir = engine_dir.join("dist");
+            std::fs::create_dir_all(&dist_dir)?;
+
+            let status = std::process::Command::new("tar")
+                .args(["-xzf", archive_path.to_str().unwrap(), "-C", dist_dir.to_str().unwrap()])
+                .status()?;
+
+            if !status.success() {
+                return Err(anyhow::anyhow!("Extraction failed"));
+            }
+
+            // Write marker
+            let marker = serde_json::json!({
+                "engine_id": engine_id,
+                "version": latest_tag
+            });
+            std::fs::write(engine_dir.join("installed.json"), serde_json::to_vec_pretty(&marker)?)?;
+
+            println!("\n✓ Installed {} to {}", latest_tag, engine_dir.display());
+            println!("\nNote: Update ~/.config/elm/manifests/eve-online.json to use the new engine");
         }
         Commands::Validate { schemas, channel, engine, manifest, profile } => {
             if let Some(p) = channel {
