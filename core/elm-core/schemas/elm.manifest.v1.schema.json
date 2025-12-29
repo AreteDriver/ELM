@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:elm:manifest:v1",
+  "type": "object",
+  "required": ["schema", "id", "display_name", "installer", "engine", "runtime", "launch"],
+  "properties": {
+    "schema": { "const": "elm.manifest.v1" },
+    "id": { "type": "string", "minLength": 1 },
+    "display_name": { "type": "string", "minLength": 1 },
+    "installer": {
+      "type": "object",
+      "required": ["type", "source", "install_dir"],
+      "properties": {
+        "type": { "enum": ["launcher"] },
+        "source": {
+          "type": "object",
+          "required": ["url"],
+          "properties": {
+            "url": { "type": "string", "minLength": 1 },
+            "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" }
+          },
+          "additionalProperties": false
+        },
+        "install_dir": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "engine": {
+      "type": "object",
+      "required": ["ref"],
+      "properties": { "ref": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["wineprefix_layout", "dx", "components"],
+      "properties": {
+        "wineprefix_layout": { "enum": ["per-profile"] },
+        "dx": {
+          "type": "object",
+          "required": ["preferred", "allow_dx12"],
+          "properties": {
+            "preferred": { "enum": ["dx11", "dx12"] },
+            "allow_dx12": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "components": {
+          "type": "object",
+          "required": ["dxvk", "vkd3d"],
+          "properties": {
+            "dxvk": {
+              "type": "object",
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } },
+              "additionalProperties": false
+            },
+            "vkd3d": {
+              "type": "object",
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "env": {
+      "type": "object",
+      "properties": {
+        "base": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "launch": {
+      "type": "object",
+      "required": ["entrypoints"],
+      "properties": {
+        "entrypoints": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "enum": ["exe"] },
+              "path": { "type": "string" },
+              "args": { "type": "array", "items": { "type": "string" } }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

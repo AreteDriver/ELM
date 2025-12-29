@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:elm:profile:v1",
+  "type": "object",
+  "required": ["schema", "name", "channel", "manifest", "engine", "overrides"],
+  "properties": {
+    "schema": { "const": "elm.profile.v1" },
+    "name": { "type": "string", "minLength": 1 },
+    "channel": { "type": "string", "minLength": 1 },
+    "manifest": { "type": "string", "minLength": 1 },
+    "engine": { "type": "string", "minLength": 1 },
+    "overrides": { "type": "object" }
+  },
+  "additionalProperties": false
+}

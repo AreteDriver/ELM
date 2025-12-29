@@ -1,0 +1,14 @@
+{
+  "schema": "elm.engine.v1",
+  "id": "ge-proton-10-26",
+  "type": "proton",
+  "source": {
+    "kind": "url",
+    "url": "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton10-26/GE-Proton10-26.tar.gz"
+  },
+  "layout": {
+    "proton_root_subdir": "GE-Proton10-26",
+    "runner": "proton"
+  },
+  "sha256": "e2ffd9d2a1ece30b5da3d3dc9cedaa82875008d1c984b5efc7666c028203f9db"
+}

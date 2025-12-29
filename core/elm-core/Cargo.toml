@@ -1,0 +1,31 @@
+[package]
+name = "elm-core"
+version = "0.1.0"
+edition = "2021"
+description = "EVE Linux Manager - Core Library"
+
+[dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+
+# JSON Schema validation
+jsonschema = "0.21"
+
+# HTTP client for downloads
+reqwest = { version = "0.12", features = ["blocking", "rustls-tls"] }
+
+# Checksums
+sha2 = "0.10"
+hex = "0.4"
+
+# Archive handling
+tar = "0.4"
+flate2 = "1.0"
+zstd = "0.13"
+
+# Async runtime
+tokio = { version = "1.37", features = ["rt-multi-thread", "process", "macros"] }

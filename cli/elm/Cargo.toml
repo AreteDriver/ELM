@@ -1,0 +1,12 @@
+[package]
+name = "elm"
+version = "0.1.0"
+edition = "2021"
+description = "EVE Linux Manager - CLI"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1.37", features = ["rt-multi-thread", "macros"] }
+
+elm-core = { path = "../../core/elm-core" }

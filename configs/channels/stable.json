@@ -1,0 +1,18 @@
+{
+  "schema": "elm.channel.v1",
+  "name": "stable",
+  "description": "Stable EVE Online configuration using GE-Proton with optimized settings",
+  "priority": 100,
+  "defaults": {
+    "manifest": "eve-online",
+    "engine": "ge-proton-10-26",
+    "settings_preset": "optimized"
+  },
+  "manifests": {
+    "eve-online": "manifests/eve-online.json"
+  },
+  "constraints": {
+    "min_vulkan": "1.3",
+    "gpu_vendors": ["nvidia", "amd", "intel"]
+  }
+}

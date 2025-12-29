@@ -1,0 +1,12 @@
+{
+  "schema": "elm.profile.v1",
+  "name": "default",
+  "channel": "stable",
+  "manifest": "eve-online",
+  "engine": "ge-proton-10-26",
+  "overrides": {
+    "env": {
+      "MANGOHUD": "0"
+    }
+  }
+}

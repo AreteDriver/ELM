@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:elm:channel:v1",
+  "type": "object",
+  "required": ["schema", "name", "description", "priority", "defaults", "manifests"],
+  "properties": {
+    "schema": { "const": "elm.channel.v1" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "priority": { "type": "integer", "minimum": 0, "maximum": 1000 },
+    "defaults": {
+      "type": "object",
+      "required": ["manifest", "engine", "settings_preset"],
+      "properties": {
+        "manifest": { "type": "string", "minLength": 1 },
+        "engine": { "type": "string", "minLength": 1 },
+        "settings_preset": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "manifests": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "constraints": {
+      "type": "object",
+      "properties": {
+        "min_vulkan": { "type": "string" },
+        "gpu_vendors": {
+          "type": "array",
+          "items": { "enum": ["nvidia", "amd", "intel"] },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

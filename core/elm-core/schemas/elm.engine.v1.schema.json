@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:elm:engine:v1",
+  "type": "object",
+  "required": ["schema", "id", "type", "source", "layout", "sha256"],
+  "properties": {
+    "schema": { "const": "elm.engine.v1" },
+    "id": { "type": "string", "minLength": 1 },
+    "type": { "enum": ["proton"] },
+    "source": {
+      "type": "object",
+      "required": ["kind", "url"],
+      "properties": {
+        "kind": { "enum": ["url"] },
+        "url": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "layout": {
+      "type": "object",
+      "required": ["proton_root_subdir", "runner"],
+      "properties": {
+        "proton_root_subdir": { "type": "string", "minLength": 1 },
+        "runner": { "const": "proton" }
+      },
+      "additionalProperties": false
+    },
+    "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" }
+  },
+  "additionalProperties": false
+}
