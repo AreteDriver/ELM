@@ -43,6 +43,21 @@ enum Commands {
         #[arg(long)]
         install: bool,
     },
+    /// Clean up old engines and download cache
+    Clean {
+        /// Only show what would be removed (dry run)
+        #[arg(long)]
+        dry_run: bool,
+        /// Remove all downloaded archives
+        #[arg(long)]
+        downloads: bool,
+        /// Remove old engine versions (keep latest)
+        #[arg(long)]
+        engines: bool,
+        /// Remove everything (downloads + old engines)
+        #[arg(long)]
+        all: bool,
+    },
     Validate {
         #[arg(long)]
         schemas: PathBuf,
@@ -721,6 +736,105 @@ async fn main() -> Result<()> {
 
             println!("\n✓ Installed {} to {}", latest_tag, engine_dir.display());
             println!("\nNote: Update ~/.config/elm/manifests/eve-online.json to use the new engine");
+        }
+        Commands::Clean { dry_run, downloads, engines, all } => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let data_dir = PathBuf::from(format!("{home}/.local/share/elm"));
+            let downloads_dir = data_dir.join("downloads");
+            let engines_dir = data_dir.join("engines");
+
+            let clean_downloads = downloads || all;
+            let clean_engines = engines || all;
+
+            if !clean_downloads && !clean_engines {
+                println!("ELM Clean");
+                println!("=========\n");
+                println!("Specify what to clean:");
+                println!("  --downloads  Remove downloaded archives");
+                println!("  --engines    Remove old engine versions (keep latest)");
+                println!("  --all        Remove both");
+                println!("  --dry-run    Show what would be removed");
+                return Ok(());
+            }
+
+            let mut total_freed: u64 = 0;
+
+            // Clean downloads
+            if clean_downloads && downloads_dir.exists() {
+                println!("Downloads:");
+                let mut download_size: u64 = 0;
+                let mut files_to_remove = Vec::new();
+
+                for entry in std::fs::read_dir(&downloads_dir)?.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                        download_size += size;
+                        files_to_remove.push(path);
+                    }
+                }
+
+                if files_to_remove.is_empty() {
+                    println!("  (no files to clean)");
+                } else {
+                    for path in &files_to_remove {
+                        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                        println!("  {} {}", if dry_run { "○" } else { "✗" }, path.file_name().unwrap().to_string_lossy());
+                        if !dry_run {
+                            std::fs::remove_file(path)?;
+                        }
+                        total_freed += size;
+                    }
+                    println!("  {} ({:.1} MB)",
+                        if dry_run { "Would free" } else { "Freed" },
+                        download_size as f64 / 1_048_576.0);
+                }
+                println!();
+            }
+
+            // Clean old engines (keep latest)
+            if clean_engines && engines_dir.exists() {
+                println!("Engines:");
+                let mut engine_entries: Vec<_> = std::fs::read_dir(&engines_dir)?
+                    .flatten()
+                    .filter(|e| e.path().is_dir() && e.path().join("installed.json").exists())
+                    .collect();
+
+                if engine_entries.len() <= 1 {
+                    println!("  (only one engine installed, nothing to clean)");
+                } else {
+                    // Sort by name (version) descending to keep latest
+                    engine_entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+
+                    // Keep the first (latest), remove the rest
+                    let latest = &engine_entries[0];
+                    println!("  ✓ Keeping: {}", latest.file_name().to_string_lossy());
+
+                    for entry in &engine_entries[1..] {
+                        let path = entry.path();
+                        let size = dir_size(&path).unwrap_or(0);
+                        println!("  {} {} ({:.1} GB)",
+                            if dry_run { "○" } else { "✗" },
+                            entry.file_name().to_string_lossy(),
+                            size as f64 / 1_073_741_824.0);
+
+                        if !dry_run {
+                            std::fs::remove_dir_all(&path)?;
+                        }
+                        total_freed += size;
+                    }
+                }
+                println!();
+            }
+
+            // Summary
+            println!("----------");
+            if dry_run {
+                println!("Dry run: would free {:.2} GB", total_freed as f64 / 1_073_741_824.0);
+                println!("\nRun without --dry-run to actually clean");
+            } else {
+                println!("Freed {:.2} GB", total_freed as f64 / 1_073_741_824.0);
+            }
         }
         Commands::Validate { schemas, channel, engine, manifest, profile } => {
             if let Some(p) = channel {
