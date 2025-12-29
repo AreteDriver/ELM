@@ -177,6 +177,13 @@ enum ProfileCmd {
         /// Profile name
         name: String,
     },
+    /// Clone an existing profile to a new one
+    Clone {
+        /// Source profile name
+        source: String,
+        /// New profile name
+        target: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1034,6 +1041,37 @@ async fn main() -> Result<()> {
                     println!("  elm run --profile {}           # Launch EVE", name);
                     println!("  elm snapshot --prefix {} \\", prefix_dir.display());
                     println!("    --snapshots {} --name {}-backup", snapshots_dir.display(), name);
+                }
+                ProfileCmd::Clone { source, target } => {
+                    let source_dir = prefixes_dir.join(format!("eve-{}", source));
+                    let target_dir = prefixes_dir.join(format!("eve-{}", target));
+
+                    if !source_dir.exists() {
+                        println!("Source profile '{}' not found", source);
+                        return Ok(());
+                    }
+
+                    if target_dir.exists() {
+                        println!("Target profile '{}' already exists", target);
+                        return Ok(());
+                    }
+
+                    let source_size = dir_size(&source_dir).unwrap_or(0);
+                    println!("Cloning profile '{}' to '{}'...", source, target);
+                    println!("Size: {:.2} GB", source_size as f64 / 1_073_741_824.0);
+                    println!();
+
+                    // Use cp -a for preserving symlinks and attributes
+                    let status = std::process::Command::new("cp")
+                        .args(["-a", source_dir.to_str().unwrap(), target_dir.to_str().unwrap()])
+                        .status()?;
+
+                    if !status.success() {
+                        return Err(anyhow::anyhow!("Failed to clone profile"));
+                    }
+
+                    println!("✓ Profile '{}' cloned to '{}'", source, target);
+                    println!("\nLaunch with: elm run --profile {}", target);
                 }
             }
         }
