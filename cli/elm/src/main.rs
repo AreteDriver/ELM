@@ -20,6 +20,8 @@ enum Commands {
     },
     /// Show installed engines, prefixes, and snapshots
     Status,
+    /// Check system compatibility and dependencies
+    Doctor,
     Validate {
         #[arg(long)]
         schemas: PathBuf,
@@ -283,6 +285,141 @@ async fn main() -> Result<()> {
             println!("\nPaths:");
             println!("  Data:   {}", data_dir.display());
             println!("  Config: {}", config_dir.display());
+        }
+        Commands::Doctor => {
+            println!("ELM Doctor");
+            println!("==========\n");
+
+            let mut issues = 0;
+
+            // Check Vulkan
+            print!("Vulkan: ");
+            let vulkan_ok = std::process::Command::new("vulkaninfo")
+                .arg("--summary")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if vulkan_ok {
+                println!("✓ available");
+            } else {
+                println!("✗ not found (install vulkan-tools)");
+                issues += 1;
+            }
+
+            // Check GPU
+            print!("GPU:    ");
+            let gpu_info = std::process::Command::new("sh")
+                .args(["-c", "lspci | grep -i vga | head -1"])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .unwrap_or_default();
+            if !gpu_info.is_empty() {
+                let gpu = gpu_info.split(':').last().unwrap_or(&gpu_info).trim();
+                println!("✓ {}", gpu);
+            } else {
+                println!("? unknown");
+            }
+
+            // Check driver
+            print!("Driver: ");
+            let driver = if std::path::Path::new("/proc/driver/nvidia/version").exists() {
+                let ver = std::fs::read_to_string("/proc/driver/nvidia/version")
+                    .unwrap_or_default()
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                format!("NVIDIA {}", ver.split_whitespace().nth(7).unwrap_or(""))
+            } else {
+                std::process::Command::new("sh")
+                    .args(["-c", "glxinfo 2>/dev/null | grep 'OpenGL version' | head -1"])
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            };
+            if driver.contains("unknown") {
+                println!("? {}", driver);
+            } else {
+                println!("✓ {}", driver.chars().take(50).collect::<String>());
+            }
+
+            // Check Steam
+            print!("Steam:  ");
+            let home = std::env::var("HOME").unwrap_or_default();
+            let steam_path = format!("{home}/.steam/steam");
+            if std::path::Path::new(&steam_path).exists() {
+                println!("✓ {}", steam_path);
+            } else {
+                println!("✗ not found at {}", steam_path);
+                issues += 1;
+            }
+
+            // Check Python3
+            print!("Python: ");
+            let python_ver = std::process::Command::new("python3")
+                .arg("--version")
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .unwrap_or_default();
+            if !python_ver.is_empty() {
+                println!("✓ {}", python_ver.trim());
+            } else {
+                println!("✗ python3 not found");
+                issues += 1;
+            }
+
+            // Check libraries
+            println!("\nLibraries:");
+            let libs = [
+                ("libvulkan", "vulkan-icd-loader"),
+                ("libGL", "mesa"),
+                ("libX11", "libx11"),
+            ];
+            for (lib, pkg) in libs {
+                print!("  {}: ", lib);
+                let found = std::process::Command::new("ldconfig")
+                    .args(["-p"])
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| s.contains(lib))
+                    .unwrap_or(false);
+                if found {
+                    println!("✓");
+                } else {
+                    println!("✗ (install {})", pkg);
+                    issues += 1;
+                }
+            }
+
+            // Check disk space
+            println!("\nDisk:");
+            let data_dir = PathBuf::from(format!("{home}/.local/share/elm"));
+            if let Ok(output) = std::process::Command::new("df")
+                .args(["-h", data_dir.to_str().unwrap_or("/home")])
+                .output()
+            {
+                if let Ok(s) = String::from_utf8(output.stdout) {
+                    if let Some(line) = s.lines().nth(1) {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 4 {
+                            println!("  Available: {} (on {})", parts[3], parts[0]);
+                        }
+                    }
+                }
+            }
+
+            // Summary
+            println!("\n----------");
+            if issues == 0 {
+                println!("✓ System ready for EVE Online");
+            } else {
+                println!("✗ {} issue(s) found", issues);
+            }
         }
         Commands::Validate { schemas, channel, engine, manifest, profile } => {
             if let Some(p) = channel {
