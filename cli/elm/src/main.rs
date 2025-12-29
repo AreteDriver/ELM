@@ -26,6 +26,12 @@ enum Commands {
         /// Send desktop notification when EVE closes
         #[arg(long)]
         notify: bool,
+        /// Enable MangoHud performance overlay (FPS, GPU, CPU stats)
+        #[arg(long)]
+        hud: bool,
+        /// MangoHud config (e.g., "fps,gpu_temp,cpu_temp,frametime")
+        #[arg(long, default_value = "")]
+        hud_config: String,
         /// Additional arguments to pass to EVE
         #[arg(long, num_args = 1..)]
         args: Vec<String>,
@@ -228,7 +234,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.cmd {
-        Commands::Run { profile, singularity, dx12, notify, args: extra_args } => {
+        Commands::Run { profile, singularity, dx12, notify, hud, hud_config, args: extra_args } => {
             let home = std::env::var("HOME").unwrap_or_default();
             let data_dir = PathBuf::from(format!("{home}/.local/share/elm"));
             let config_dir = std::env::var("ELM_CONFIG_DIR")
@@ -297,6 +303,18 @@ async fn main() -> Result<()> {
                 env_vars.insert("VKD3D_FEATURE_LEVEL".to_string(), "12_1".to_string());
             }
 
+            // Enable MangoHud overlay
+            if hud {
+                env_vars.insert("MANGOHUD".to_string(), "1".to_string());
+                if !hud_config.is_empty() {
+                    env_vars.insert("MANGOHUD_CONFIG".to_string(), hud_config.clone());
+                } else {
+                    // Default config: FPS, frametime, GPU/CPU stats
+                    env_vars.insert("MANGOHUD_CONFIG".to_string(),
+                        "fps,frametime,gpu_stats,gpu_temp,cpu_stats,cpu_temp,ram,vram".to_string());
+                }
+            }
+
             let engine_dist = engines_dir.join(&engine_id).join("dist");
             let prefix_dir = prefixes_dir.join(format!("eve-{}", profile));
 
@@ -341,7 +359,8 @@ async fn main() -> Result<()> {
             // Show launch info
             let server = if singularity { "Singularity (test)" } else { "Tranquility" };
             let dx_mode = if dx12 { "DirectX 12" } else { "DirectX 11" };
-            println!("✓ Server: {}, Mode: {}", server, dx_mode);
+            let hud_status = if hud { ", HUD: On" } else { "" };
+            println!("✓ Server: {}, Mode: {}{}", server, dx_mode, hud_status);
 
             if !launch_args.is_empty() {
                 println!("✓ Args: {}", launch_args.join(" "));
@@ -571,6 +590,19 @@ async fn main() -> Result<()> {
             } else {
                 println!("✗ python3 not found");
                 issues += 1;
+            }
+
+            // Check MangoHud (optional)
+            print!("MangoHud: ");
+            let mangohud_ok = std::process::Command::new("mangohud")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if mangohud_ok {
+                println!("✓ available (use --hud to enable)");
+            } else {
+                println!("○ not installed (optional, for FPS overlay)");
             }
 
             // Check libraries
