@@ -42,6 +42,9 @@ enum Commands {
         /// Actually download and install the update
         #[arg(long)]
         install: bool,
+        /// Skip automatic prefix backup before updating
+        #[arg(long)]
+        no_backup: bool,
     },
     /// Clean up old engines and download cache
     Clean {
@@ -636,10 +639,13 @@ async fn main() -> Result<()> {
                 println!("(could not read log file)");
             }
         }
-        Commands::Update { install } => {
+        Commands::Update { install, no_backup } => {
             let home = std::env::var("HOME").unwrap_or_default();
-            let engines_dir = PathBuf::from(format!("{home}/.local/share/elm/engines"));
-            let downloads_dir = PathBuf::from(format!("{home}/.local/share/elm/downloads"));
+            let data_dir = PathBuf::from(format!("{home}/.local/share/elm"));
+            let engines_dir = data_dir.join("engines");
+            let downloads_dir = data_dir.join("downloads");
+            let prefixes_dir = data_dir.join("prefixes");
+            let snapshots_dir = data_dir.join("snapshots");
 
             println!("Checking for engine updates...\n");
 
@@ -704,8 +710,52 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
+            // Auto-backup existing prefixes before update
+            if !no_backup && prefixes_dir.exists() {
+                let prefixes: Vec<_> = std::fs::read_dir(&prefixes_dir)?
+                    .flatten()
+                    .filter(|e| e.path().is_dir() && e.path().join("pfx/drive_c").exists())
+                    .collect();
+
+                if !prefixes.is_empty() {
+                    println!("\nBacking up {} prefix(es) before update...", prefixes.len());
+                    std::fs::create_dir_all(&snapshots_dir)?;
+
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+
+                    for entry in &prefixes {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        let snapshot_name = format!("{}-pre-update-{}", name, timestamp);
+                        let prefix_path = entry.path();
+
+                        print!("  {} ... ", name);
+                        std::io::Write::flush(&mut std::io::stdout())?;
+
+                        match elm_core::rollback::snapshot::snapshot_prefix(
+                            &prefix_path.join("pfx"),
+                            &snapshots_dir,
+                            &snapshot_name
+                        ) {
+                            Ok(out) => {
+                                let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+                                println!("✓ ({:.1} GB)", size as f64 / 1_073_741_824.0);
+                            }
+                            Err(e) => {
+                                println!("✗ ({})", e);
+                                println!("\nWarning: Backup failed, but continuing with update.");
+                                println!("You may want to manually backup your prefix before proceeding.");
+                            }
+                        }
+                    }
+                    println!();
+                }
+            }
+
             // Download and install
-            println!("\nDownloading {}...", latest_tag);
+            println!("Downloading {}...", latest_tag);
 
             let download_url = format!(
                 "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/{}/{}.tar.gz",
