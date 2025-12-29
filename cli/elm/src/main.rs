@@ -164,12 +164,23 @@ async fn main() -> Result<()> {
                     ("PROTON_NO_FSYNC", "1"),
                 ].into_iter().map(|(k,v)| (k.to_string(), v.to_string())).collect());
 
-            let proton_root = engines_dir.join(&engine_id).join(format!("dist/GE-Proton10-26"));
+            let engine_dist = engines_dir.join(&engine_id).join("dist");
             let prefix_dir = prefixes_dir.join(format!("eve-{}", profile));
+
+            // Find the actual proton subdirectory (e.g., GE-Proton10-27)
+            let proton_root = if engine_dist.exists() {
+                std::fs::read_dir(&engine_dist)?
+                    .filter_map(|e| e.ok())
+                    .find(|e| e.path().join("proton").exists())
+                    .map(|e| e.path())
+                    .ok_or_else(|| anyhow::anyhow!("No proton found in {}", engine_dist.display()))?
+            } else {
+                return Err(anyhow::anyhow!("Engine not installed. Run: elm update --install"));
+            };
 
             // 1. Ensure engine is installed
             if !proton_root.join("proton").exists() {
-                println!("Engine not found. Run: elm engine install ...");
+                println!("Engine not found. Run: elm update --install");
                 return Err(anyhow::anyhow!("Engine not installed at {}", proton_root.display()));
             }
             println!("✓ Engine: {}", engine_id);
