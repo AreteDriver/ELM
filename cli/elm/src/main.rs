@@ -191,6 +191,11 @@ enum ConfigCmd {
     Show,
     /// Edit config in default editor
     Edit,
+    /// Apply a settings preset (performance, quality, balanced)
+    Preset {
+        /// Preset name: performance, quality, balanced
+        name: String,
+    },
 }
 
 #[tokio::main]
@@ -1185,6 +1190,107 @@ async fn main() -> Result<()> {
                         println!("Config saved.");
                     } else {
                         println!("Editor exited with error");
+                    }
+                }
+                ConfigCmd::Preset { name } => {
+                    let manifest_path = manifests_dir.join("eve-online.json");
+
+                    // Define presets
+                    let presets: std::collections::HashMap<&str, serde_json::Value> = [
+                        ("performance", serde_json::json!({
+                            "DXVK_ASYNC": "1",
+                            "PROTON_NO_ESYNC": "0",
+                            "PROTON_NO_FSYNC": "0",
+                            "DXVK_HUD": "",
+                            "WINE_FULLSCREEN_FSR": "1",
+                            "WINE_FULLSCREEN_FSR_STRENGTH": "2",
+                            "PROTON_ENABLE_NVAPI": "1",
+                            "VKD3D_FEATURE_LEVEL": "12_1",
+                            "__GL_SHADER_DISK_CACHE": "1",
+                            "__GL_SHADER_DISK_CACHE_SKIP_CLEANUP": "1"
+                        })),
+                        ("quality", serde_json::json!({
+                            "DXVK_ASYNC": "0",
+                            "PROTON_NO_ESYNC": "0",
+                            "PROTON_NO_FSYNC": "0",
+                            "DXVK_HUD": "",
+                            "WINE_FULLSCREEN_FSR": "0",
+                            "PROTON_ENABLE_NVAPI": "1",
+                            "VKD3D_FEATURE_LEVEL": "12_1",
+                            "__GL_SHADER_DISK_CACHE": "1"
+                        })),
+                        ("balanced", serde_json::json!({
+                            "DXVK_ASYNC": "1",
+                            "PROTON_NO_ESYNC": "0",
+                            "PROTON_NO_FSYNC": "0",
+                            "DXVK_HUD": "fps",
+                            "WINE_FULLSCREEN_FSR": "1",
+                            "PROTON_ENABLE_NVAPI": "1",
+                            "VKD3D_FEATURE_LEVEL": "12_1"
+                        })),
+                        ("debug", serde_json::json!({
+                            "DXVK_ASYNC": "1",
+                            "PROTON_NO_ESYNC": "0",
+                            "PROTON_NO_FSYNC": "0",
+                            "DXVK_HUD": "fps,frametimes,gpuload,devinfo",
+                            "DXVK_LOG_LEVEL": "info",
+                            "PROTON_LOG": "1",
+                            "WINEDEBUG": "warn+all"
+                        }))
+                    ].into_iter().collect();
+
+                    let preset_name = name.to_lowercase();
+                    let preset = match presets.get(preset_name.as_str()) {
+                        Some(p) => p,
+                        None => {
+                            println!("Unknown preset: {}", name);
+                            println!("\nAvailable presets:");
+                            println!("  performance  - Maximum FPS, FSR upscaling, minimal HUD");
+                            println!("  quality      - Native resolution, no async shaders");
+                            println!("  balanced     - Good performance with FPS counter");
+                            println!("  debug        - Verbose logging for troubleshooting");
+                            return Ok(());
+                        }
+                    };
+
+                    // Load existing config or create new
+                    let mut config: serde_json::Value = if manifest_path.exists() {
+                        let content = std::fs::read_to_string(&manifest_path)?;
+                        serde_json::from_str(&content)?
+                    } else {
+                        std::fs::create_dir_all(&manifests_dir)?;
+                        serde_json::json!({
+                            "schema": "elm.manifest.v1",
+                            "id": "eve-online",
+                            "display_name": "EVE Online",
+                            "engine": { "ref": "ge-proton10-27" },
+                            "env": { "base": {} }
+                        })
+                    };
+
+                    // Update env.base with preset values
+                    if let Some(env) = config.get_mut("env") {
+                        if let Some(base) = env.get_mut("base") {
+                            if let Some(base_obj) = base.as_object_mut() {
+                                if let Some(preset_obj) = preset.as_object() {
+                                    for (k, v) in preset_obj {
+                                        base_obj.insert(k.clone(), v.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Write updated config
+                    let pretty = serde_json::to_string_pretty(&config)?;
+                    std::fs::write(&manifest_path, pretty)?;
+
+                    println!("Applied '{}' preset to {}", preset_name, manifest_path.display());
+                    println!("\nSettings:");
+                    if let Some(preset_obj) = preset.as_object() {
+                        for (k, v) in preset_obj {
+                            println!("  {}={}", k, v.as_str().unwrap_or("?"));
+                        }
                     }
                 }
             }
