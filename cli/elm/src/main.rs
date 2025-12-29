@@ -60,6 +60,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: ProfileCmd,
     },
+    /// Manage configuration files
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCmd,
+    },
     Engine {
         #[command(subcommand)]
         cmd: EngineCmd,
@@ -157,6 +162,20 @@ enum ProfileCmd {
         /// Profile name
         name: String,
     },
+}
+
+#[derive(Subcommand)]
+enum ConfigCmd {
+    /// Initialize config files with defaults
+    Init {
+        /// Overwrite existing configs
+        #[arg(long)]
+        force: bool,
+    },
+    /// Show current config file paths
+    Show,
+    /// Edit config in default editor
+    Edit,
 }
 
 #[tokio::main]
@@ -896,6 +915,163 @@ async fn main() -> Result<()> {
                     println!("  elm run --profile {}           # Launch EVE", name);
                     println!("  elm snapshot --prefix {} \\", prefix_dir.display());
                     println!("    --snapshots {} --name {}-backup", snapshots_dir.display(), name);
+                }
+            }
+        }
+        Commands::Config { cmd } => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let config_dir = PathBuf::from(format!("{home}/.config/elm"));
+            let manifests_dir = config_dir.join("manifests");
+
+            match cmd {
+                ConfigCmd::Init { force } => {
+                    println!("Initializing ELM configuration...\n");
+
+                    // Create directories
+                    std::fs::create_dir_all(&manifests_dir)?;
+
+                    // Default manifest
+                    let manifest_path = manifests_dir.join("eve-online.json");
+                    if manifest_path.exists() && !force {
+                        println!("  ○ {} (exists, use --force to overwrite)", manifest_path.display());
+                    } else {
+                        let default_manifest = r#"{
+  "schema": "elm.manifest.v1",
+  "id": "eve-online",
+  "display_name": "EVE Online",
+  "installer": {
+    "type": "launcher",
+    "source": {
+      "url": "https://binaries.eveonline.com/EveLauncher-2180591.exe"
+    },
+    "install_dir": "CCP/EVE"
+  },
+  "engine": {
+    "ref": "ge-proton10-27"
+  },
+  "runtime": {
+    "wineprefix_layout": "per-profile",
+    "dx": {
+      "preferred": "dx11",
+      "allow_dx12": true
+    },
+    "components": {
+      "dxvk": { "enabled": true },
+      "vkd3d": { "enabled": true }
+    }
+  },
+  "env": {
+    "base": {
+      "DXVK_ASYNC": "1",
+      "PROTON_NO_ESYNC": "0",
+      "PROTON_NO_FSYNC": "0",
+      "PROTON_ENABLE_NVAPI": "1",
+      "VKD3D_FEATURE_LEVEL": "12_1",
+      "WINE_FULLSCREEN_FSR": "1"
+    }
+  },
+  "launch": {
+    "entrypoints": [
+      {
+        "name": "EVE Launcher",
+        "type": "exe",
+        "path": "drive_c/users/steamuser/AppData/Local/eve-online/app-1.12.8/eve-online.exe"
+      }
+    ]
+  }
+}
+"#;
+                        std::fs::write(&manifest_path, default_manifest)?;
+                        println!("  ✓ Created {}", manifest_path.display());
+                    }
+
+                    println!("\nConfiguration initialized!");
+                    println!("\nEdit your config:");
+                    println!("  elm config edit");
+                    println!("\nOr manually edit:");
+                    println!("  {}", manifest_path.display());
+                }
+                ConfigCmd::Show => {
+                    println!("ELM Configuration");
+                    println!("=================\n");
+
+                    println!("Config directory: {}", config_dir.display());
+                    println!();
+
+                    println!("Files:");
+                    let manifest_path = manifests_dir.join("eve-online.json");
+                    if manifest_path.exists() {
+                        let size = std::fs::metadata(&manifest_path).map(|m| m.len()).unwrap_or(0);
+                        println!("  ✓ {} ({} bytes)", manifest_path.display(), size);
+                    } else {
+                        println!("  ○ {} (not found)", manifest_path.display());
+                        println!("\n  Run 'elm config init' to create default configs");
+                    }
+
+                    // Show current settings if config exists
+                    if manifest_path.exists() {
+                        if let Ok(content) = std::fs::read_to_string(&manifest_path) {
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                                println!();
+                                println!("Current settings:");
+                                if let Some(engine) = json.get("engine").and_then(|e| e.get("ref")) {
+                                    println!("  Engine: {}", engine.as_str().unwrap_or("?"));
+                                }
+                                if let Some(env) = json.get("env").and_then(|e| e.get("base")) {
+                                    if let Some(obj) = env.as_object() {
+                                        println!("  Environment variables: {}", obj.len());
+                                        for (k, v) in obj.iter().take(5) {
+                                            println!("    {}={}", k, v.as_str().unwrap_or("?"));
+                                        }
+                                        if obj.len() > 5 {
+                                            println!("    ... and {} more", obj.len() - 5);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                ConfigCmd::Edit => {
+                    let manifest_path = manifests_dir.join("eve-online.json");
+
+                    if !manifest_path.exists() {
+                        println!("Config file not found. Creating with defaults...");
+                        // Trigger init
+                        std::fs::create_dir_all(&manifests_dir)?;
+                        let default_manifest = r#"{
+  "schema": "elm.manifest.v1",
+  "id": "eve-online",
+  "display_name": "EVE Online",
+  "engine": { "ref": "ge-proton10-27" },
+  "env": {
+    "base": {
+      "DXVK_ASYNC": "1",
+      "PROTON_NO_ESYNC": "0",
+      "PROTON_NO_FSYNC": "0"
+    }
+  }
+}
+"#;
+                        std::fs::write(&manifest_path, default_manifest)?;
+                    }
+
+                    // Open in editor
+                    let editor = std::env::var("EDITOR")
+                        .or_else(|_| std::env::var("VISUAL"))
+                        .unwrap_or_else(|_| "nano".to_string());
+
+                    println!("Opening {} in {}...", manifest_path.display(), editor);
+
+                    let status = std::process::Command::new(&editor)
+                        .arg(&manifest_path)
+                        .status()?;
+
+                    if status.success() {
+                        println!("Config saved.");
+                    } else {
+                        println!("Editor exited with error");
+                    }
                 }
             }
         }
