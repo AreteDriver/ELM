@@ -57,7 +57,7 @@ def launch_eve(icon, item):
         global eve_running, eve_process
         eve_running = True
         update_menu(icon)
-        eve_process = subprocess.Popen([ELM_BIN, "run"])
+        eve_process = subprocess.Popen([ELM_BIN, "run", "--notify"])
         eve_process.wait()
         eve_running = False
         eve_process = None
@@ -75,7 +75,7 @@ def launch_profile(profile_name):
             global eve_running, eve_process
             eve_running = True
             update_menu(icon)
-            eve_process = subprocess.Popen([ELM_BIN, "run", "--profile", profile_name])
+            eve_process = subprocess.Popen([ELM_BIN, "run", "--profile", profile_name, "--notify"])
             eve_process.wait()
             eve_running = False
             eve_process = None
@@ -99,6 +99,14 @@ def show_doctor(icon, item):
 def check_updates(icon, item):
     """Check for engine updates."""
     run_command("update", terminal=True)
+
+
+def check_updates_background():
+    """Silently check for updates and notify if available."""
+    try:
+        subprocess.run([ELM_BIN, "update", "--notify"], capture_output=True, timeout=30)
+    except Exception:
+        pass  # Ignore errors in background check
 
 
 def show_logs(icon, item):
@@ -188,6 +196,9 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+
+    # Check for updates in background on startup
+    threading.Thread(target=check_updates_background, daemon=True).start()
 
     print("ELM Tray running. Right-click the tray icon for options.")
     icon.run()

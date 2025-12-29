@@ -23,6 +23,9 @@ enum Commands {
         /// Use DirectX 12 instead of DirectX 11
         #[arg(long)]
         dx12: bool,
+        /// Send desktop notification when EVE closes
+        #[arg(long)]
+        notify: bool,
         /// Additional arguments to pass to EVE
         #[arg(long, num_args = 1..)]
         args: Vec<String>,
@@ -54,6 +57,9 @@ enum Commands {
         /// Skip automatic prefix backup before updating
         #[arg(long)]
         no_backup: bool,
+        /// Send desktop notification if update available
+        #[arg(long)]
+        notify: bool,
     },
     /// Clean up old engines and download cache
     Clean {
@@ -222,7 +228,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.cmd {
-        Commands::Run { profile, singularity, dx12, args: extra_args } => {
+        Commands::Run { profile, singularity, dx12, notify, args: extra_args } => {
             let home = std::env::var("HOME").unwrap_or_default();
             let data_dir = PathBuf::from(format!("{home}/.local/share/elm"));
             let config_dir = std::env::var("ELM_CONFIG_DIR")
@@ -342,6 +348,8 @@ async fn main() -> Result<()> {
             }
 
             println!("Launching EVE Online...");
+            let start_time = std::time::Instant::now();
+
             let spec = elm_core::runtime::launch::LaunchSpec {
                 proton_root,
                 prefix_dir,
@@ -349,7 +357,46 @@ async fn main() -> Result<()> {
                 args: launch_args,
                 env: env_vars,
             };
-            elm_core::runtime::launch::launch(spec).await?;
+            let result = elm_core::runtime::launch::launch(spec).await;
+
+            // Send notification when EVE closes
+            if notify {
+                let duration = start_time.elapsed();
+                let hours = duration.as_secs() / 3600;
+                let minutes = (duration.as_secs() % 3600) / 60;
+
+                let time_str = if hours > 0 {
+                    format!("{}h {}m", hours, minutes)
+                } else if minutes > 0 {
+                    format!("{}m", minutes)
+                } else {
+                    "< 1m".to_string()
+                };
+
+                let (title, body, icon) = match &result {
+                    Ok(_) => (
+                        "EVE Online Closed",
+                        format!("Session ended after {}", time_str),
+                        "eve-online"
+                    ),
+                    Err(e) => (
+                        "EVE Online Error",
+                        format!("Crashed after {}: {}", time_str, e),
+                        "dialog-error"
+                    ),
+                };
+
+                let _ = std::process::Command::new("notify-send")
+                    .args([
+                        "--app-name=ELM",
+                        &format!("--icon={}", icon),
+                        title,
+                        &body,
+                    ])
+                    .spawn();
+            }
+
+            result?;
         }
         Commands::Status => {
             let home = std::env::var("HOME").unwrap_or_default();
@@ -683,7 +730,7 @@ async fn main() -> Result<()> {
                 println!("(could not read log file)");
             }
         }
-        Commands::Update { install, no_backup } => {
+        Commands::Update { install, no_backup, notify } => {
             let home = std::env::var("HOME").unwrap_or_default();
             let data_dir = PathBuf::from(format!("{home}/.local/share/elm"));
             let engines_dir = data_dir.join("engines");
@@ -748,6 +795,18 @@ async fn main() -> Result<()> {
             }
 
             println!("\n⬆ Update available!");
+
+            // Send notification if requested
+            if notify {
+                let _ = std::process::Command::new("notify-send")
+                    .args([
+                        "--app-name=ELM",
+                        "--icon=software-update-available",
+                        "EVE Engine Update Available",
+                        &format!("{} → {}", installed.as_deref().unwrap_or("none"), latest_tag),
+                    ])
+                    .spawn();
+            }
 
             if !install {
                 println!("\nRun 'elm update --install' to download and install");
