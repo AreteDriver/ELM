@@ -18,6 +18,8 @@ enum Commands {
         #[arg(long, default_value = "default")]
         profile: String,
     },
+    /// Show installed engines, prefixes, and snapshots
+    Status,
     Validate {
         #[arg(long)]
         schemas: PathBuf,
@@ -193,6 +195,95 @@ async fn main() -> Result<()> {
             };
             elm_core::runtime::launch::launch(spec).await?;
         }
+        Commands::Status => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let data_dir = PathBuf::from(format!("{home}/.local/share/elm"));
+            let config_dir = PathBuf::from(format!("{home}/.config/elm"));
+
+            println!("ELM Status");
+            println!("==========\n");
+
+            // Engines
+            println!("Engines:");
+            let engines_dir = data_dir.join("engines");
+            if engines_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&engines_dir) {
+                    let mut found = false;
+                    for entry in entries.flatten() {
+                        if entry.path().is_dir() {
+                            let marker = entry.path().join("installed.json");
+                            let status = if marker.exists() { "✓" } else { "○" };
+                            println!("  {} {}", status, entry.file_name().to_string_lossy());
+                            found = true;
+                        }
+                    }
+                    if !found {
+                        println!("  (none)");
+                    }
+                }
+            } else {
+                println!("  (none)");
+            }
+
+            // Prefixes
+            println!("\nPrefixes:");
+            let prefixes_dir = data_dir.join("prefixes");
+            if prefixes_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&prefixes_dir) {
+                    let mut found = false;
+                    for entry in entries.flatten() {
+                        if entry.path().is_dir() {
+                            let drive_c = entry.path().join("pfx/drive_c");
+                            let status = if drive_c.exists() { "✓" } else { "○" };
+                            // Get size
+                            let size = dir_size(&entry.path()).unwrap_or(0);
+                            println!("  {} {} ({:.1} GB)", status, entry.file_name().to_string_lossy(), size as f64 / 1_073_741_824.0);
+                            found = true;
+                        }
+                    }
+                    if !found {
+                        println!("  (none)");
+                    }
+                }
+            } else {
+                println!("  (none)");
+            }
+
+            // Snapshots
+            println!("\nSnapshots:");
+            let snapshots_dir = data_dir.join("snapshots");
+            if snapshots_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&snapshots_dir) {
+                    let mut found = false;
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().map(|e| e == "zst").unwrap_or(false) {
+                            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                            println!("  {} ({:.1} GB)", path.file_name().unwrap().to_string_lossy(), size as f64 / 1_073_741_824.0);
+                            found = true;
+                        }
+                    }
+                    if !found {
+                        println!("  (none)");
+                    }
+                }
+            } else {
+                println!("  (none)");
+            }
+
+            // Config
+            println!("\nConfig:");
+            let manifest_path = config_dir.join("manifests/eve-online.json");
+            if manifest_path.exists() {
+                println!("  ✓ {}", manifest_path.display());
+            } else {
+                println!("  (no custom config)");
+            }
+
+            println!("\nPaths:");
+            println!("  Data:   {}", data_dir.display());
+            println!("  Config: {}", config_dir.display());
+        }
         Commands::Validate { schemas, channel, engine, manifest, profile } => {
             if let Some(p) = channel {
                 let _ = elm_core::config::load::load_channel(&p, &schemas)?;
@@ -258,4 +349,20 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn dir_size(path: &std::path::Path) -> std::io::Result<u64> {
+    let mut size = 0;
+    if path.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let meta = entry.metadata()?;
+            if meta.is_dir() {
+                size += dir_size(&entry.path()).unwrap_or(0);
+            } else {
+                size += meta.len();
+            }
+        }
+    }
+    Ok(size)
 }
