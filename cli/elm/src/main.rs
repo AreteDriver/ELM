@@ -17,6 +17,15 @@ enum Commands {
         /// Profile name (default: "default")
         #[arg(long, default_value = "default")]
         profile: String,
+        /// Launch on Singularity (test server)
+        #[arg(long, visible_alias = "sisi")]
+        singularity: bool,
+        /// Use DirectX 12 instead of DirectX 11
+        #[arg(long)]
+        dx12: bool,
+        /// Additional arguments to pass to EVE
+        #[arg(long, num_args = 1..)]
+        args: Vec<String>,
     },
     /// Show installed engines, prefixes, and snapshots
     Status,
@@ -213,7 +222,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.cmd {
-        Commands::Run { profile } => {
+        Commands::Run { profile, singularity, dx12, args: extra_args } => {
             let home = std::env::var("HOME").unwrap_or_default();
             let data_dir = PathBuf::from(format!("{home}/.local/share/elm"));
             let config_dir = std::env::var("ELM_CONFIG_DIR")
@@ -243,12 +252,32 @@ async fn main() -> Result<()> {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("drive_c/users/steamuser/AppData/Local/eve-online/eve-online.exe"));
 
-            let launch_args: Vec<String> = manifest.as_ref()
-                .and_then(|m| m.launch.entrypoints.first())
-                .and_then(|e| e.args.clone())
-                .unwrap_or_else(|| vec!["/server:tranquility".to_string()]);
+            // Build launch arguments
+            let mut launch_args: Vec<String> = Vec::new();
 
-            let env_vars: HashMap<String, String> = manifest.as_ref()
+            // Server selection (--singularity overrides config)
+            if singularity {
+                launch_args.push("/server:singularity".to_string());
+            } else {
+                // Use config default or tranquility
+                let default_server = manifest.as_ref()
+                    .and_then(|m| m.launch.entrypoints.first())
+                    .and_then(|e| e.args.as_ref())
+                    .and_then(|args| args.iter().find(|a| a.starts_with("/server:")))
+                    .cloned()
+                    .unwrap_or_else(|| "/server:tranquility".to_string());
+                launch_args.push(default_server);
+            }
+
+            // DX12 mode
+            if dx12 {
+                launch_args.push("/triPlatform:dx12".to_string());
+            }
+
+            // Add any extra user-provided arguments
+            launch_args.extend(extra_args);
+
+            let mut env_vars: HashMap<String, String> = manifest.as_ref()
                 .and_then(|m| m.env.as_ref())
                 .and_then(|e| e.base.clone())
                 .unwrap_or_else(|| [
@@ -256,6 +285,11 @@ async fn main() -> Result<()> {
                     ("PROTON_NO_ESYNC", "1"),
                     ("PROTON_NO_FSYNC", "1"),
                 ].into_iter().map(|(k,v)| (k.to_string(), v.to_string())).collect());
+
+            // Enable VKD3D for DX12
+            if dx12 {
+                env_vars.insert("VKD3D_FEATURE_LEVEL".to_string(), "12_1".to_string());
+            }
 
             let engine_dist = engines_dir.join(&engine_id).join("dist");
             let prefix_dir = prefixes_dir.join(format!("eve-{}", profile));
@@ -297,6 +331,16 @@ async fn main() -> Result<()> {
             if manifest.is_some() {
                 println!("✓ Config loaded from {}", manifest_path.display());
             }
+
+            // Show launch info
+            let server = if singularity { "Singularity (test)" } else { "Tranquility" };
+            let dx_mode = if dx12 { "DirectX 12" } else { "DirectX 11" };
+            println!("✓ Server: {}, Mode: {}", server, dx_mode);
+
+            if !launch_args.is_empty() {
+                println!("✓ Args: {}", launch_args.join(" "));
+            }
+
             println!("Launching EVE Online...");
             let spec = elm_core::runtime::launch::LaunchSpec {
                 proton_root,
